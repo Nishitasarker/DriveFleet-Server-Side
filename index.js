@@ -2,18 +2,43 @@ const express = require('express');
 const dotenv = require('dotenv');
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-dotenv.config();
-const uri = process.env.MONGODB_URI;
-const app = express();
+const { createRemoteJWKSet, jwtVerify } = require('jose');
 
+dotenv.config();
+
+const app = express();
 const PORT = process.env.PORT || 5000;
-app.use(cors());
+
+app.use(cors({
+  origin: "http://localhost:3000",
+  credentials: true
+}));
 app.use(express.json());
 
-const client = new MongoClient(uri, {
+const JWKS = createRemoteJWKSet(new URL(`${process.env.BETTER_AUTH_URL}/api/auth/jwks`));
+
+const verifyToken = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.split(" ")[1];
+  console.log(token); // ← শুধু token আসবে
+  
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "Unauthorized: No token provided" });
+  }
+  
+  try {
+    const { payload } = await jwtVerify(token, JWKS);
+    req.user = payload;
+    next();
+  } catch (error) {
+    return res.status(401).json({ message: "Unauthorized: Invalid or expired token" });
+  }
+};
+
+const client = new MongoClient(process.env.MONGODB_URI, {
   serverApi: {
     version: ServerApiVersion.v1,
-    strict: true,
+    strict: false,
     deprecationErrors: true,
   }
 });
@@ -21,87 +46,39 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     await client.connect();
+    console.log("Successfully connected to MongoDB!");
+    
     const db = client.db("DriveFeet");
-
     const destinationCollection = db.collection("destination");
     const bookingCollection = db.collection("bookings");
 
-    // ১. সব গাড়ির ডাটা গেট করা
     app.get('/destination', async (req, res) => {
       const result = await destinationCollection.find().toArray();
       res.json(result);
     });
 
-    // ২. নতুন গাড়ি অ্যাড করা
-    app.post('/destination', async (req, res) => {
-      const destinationData = req.body;
-      const result = await destinationCollection.insertMany(Array.isArray(destinationData) ? destinationData : [destinationData]);
+    app.get("/destination/:id", verifyToken, async (req, res) => {
+      const result = await destinationCollection.findOne({ _id: new ObjectId(req.params.id) });
       res.json(result);
     });
 
-    // ৩. নির্দিষ্ট একটি গাড়ির ডিটেইলস গেট করা
-    app.get("/destination/:id", async (req, res) => {
-      const { id } = req.params;
-      const result = await destinationCollection.findOne({ _id: new ObjectId(id) });
-      res.json(result);
-    });
-
-    // 🚀 লজিক্যাল ফিক্স: নির্দিষ্ট লগইন করা ইউজারের EMAIL দিয়ে ডাটা খোঁজা (Trim ও Case Insensitive করা হয়েছে)
-    app.get("/booking/:userEmail", async (req, res) => {
-      try {
-        const userEmail = req.params.userEmail.trim();
-        const result = await bookingCollection.find({ 
-          userEmail: { $regex: new RegExp(`^${userEmail}$`, 'i') } 
-        }).toArray();
-        res.json(result);
-      } catch (error) {
-        res.status(500).json({ success: false, message: "Internal Server Error" });
-      }
-    });
-
-
-    
-
-    // 🚀 নতুন বুকিং ডাটাবেজে সেভ করা এবং ডুপ্লিকেট বুকিং চেক করা
-    app.post("/booking", async (req, res) => {
+    app.post("/booking", verifyToken, async (req, res) => {
       const bookingData = req.body;
-      const { userEmail, carId } = bookingData;
-
-      // ডাটাবেজে চেক করা হচ্ছে এই ইমেইল দিয়ে এই গাড়িটি ইতিমধ্যে বুক করা আছে কিনা
-      const alreadyBooked = await bookingCollection.findOne({ 
-        userEmail: { $regex: new RegExp(`^${userEmail.trim()}$`, 'i') }, 
-        carId: carId 
+      const alreadyBooked = await bookingCollection.findOne({
+        userEmail: { $regex: new RegExp(`^${bookingData.userEmail.trim()}$`, 'i') },
+        carId: bookingData.carId
       });
 
-      if (alreadyBooked) {
-        return res.status(400).json({ 
-          success: false, 
-          message: "You have already booked this car once!" 
-        });
-      }
-
+      if (alreadyBooked) return res.status(400).json({ success: false, message: "Already booked!" });
+      
       const result = await bookingCollection.insertOne(bookingData);
       res.json({ success: true, insertedId: result.insertedId });
     });
 
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
-  } finally {
-    // await client.close();
+    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  } catch (err) {
+    console.error("Connection error:", err);
   }
 }
 
-app.delete('/booking/:bookingId', async (req,res)=>{
-  const {bookingId} = req.params;
-  const result = await bookingCollection.deleteOne({_id: new ObjectId(bookingId)})
-  res.json(result)
-})
-run().catch(console.dir);
-
-app.get('/', (req, res) => {
-  res.send("Server is running fine!");
-});
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+run();
