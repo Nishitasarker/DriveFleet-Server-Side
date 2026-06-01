@@ -19,15 +19,15 @@ const JWKS = createRemoteJWKSet(new URL(`${process.env.BETTER_AUTH_URL}/api/auth
 
 const verifyToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
-  const token = authHeader?.split(" ")[1];
-  console.log(token); // ← শুধু token আসবে
-  
+
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).json({ message: "Unauthorized: No token provided" });
   }
-  
+
   try {
+    const token = authHeader.split(" ")[1];
     const { payload } = await jwtVerify(token, JWKS);
+    console.log(payload);
     req.user = payload;
     next();
   } catch (error) {
@@ -47,7 +47,7 @@ async function run() {
   try {
     await client.connect();
     console.log("Successfully connected to MongoDB!");
-    
+
     const db = client.db("DriveFeet");
     const destinationCollection = db.collection("destination");
     const bookingCollection = db.collection("bookings");
@@ -62,6 +62,21 @@ async function run() {
       res.json(result);
     });
 
+    // ✅ নতুন route যোগ করা হয়েছে
+    app.post("/destination", verifyToken, async (req, res) => {
+      const carData = req.body;
+      const result = await destinationCollection.insertOne(carData);
+      res.json({ success: true, insertedId: result.insertedId });
+    });
+
+    app.get("/booking/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+      const result = await bookingCollection.find({
+        userEmail: { $regex: new RegExp(`^${email.trim()}$`, 'i') }
+      }).toArray();
+      res.json(result);
+    });
+
     app.post("/booking", verifyToken, async (req, res) => {
       const bookingData = req.body;
       const alreadyBooked = await bookingCollection.findOne({
@@ -70,9 +85,17 @@ async function run() {
       });
 
       if (alreadyBooked) return res.status(400).json({ success: false, message: "Already booked!" });
-      
+
       const result = await bookingCollection.insertOne(bookingData);
       res.json({ success: true, insertedId: result.insertedId });
+    });
+
+    app.delete("/booking/:bookingId", verifyToken, async (req, res) => {
+      const { bookingId } = req.params;
+      const result = await bookingCollection.deleteOne({
+        _id: new ObjectId(bookingId)
+      });
+      res.json({ success: true, deletedCount: result.deletedCount });
     });
 
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
