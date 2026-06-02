@@ -144,9 +144,10 @@ Create a .env file in the root directory and append the following variables:
 
 Code snippet
 PORT=5000
-MONGODB_URI=your_mongodb_connection_string
+MONGODB_URI=mongodb://DriveFleet:o82Ss1cRtfL2o7gb@ac-o35aqvy-shard-00-00.vmzudvv.mongodb.net:27017,ac-o35aqvy-shard-00-01.vmzudvv.mongodb.net:27017,ac-o35aqvy-shard-00-02.vmzudvv.mongodb.net:27017/?ssl=true&replicaSet=atlas-4fx8yo-shard-0&authSource=admin&appName=Cluster0
+
 CLIENT_URL=http://localhost:3000
-(Note: Ensure your CLIENT_URL matches the domain of your Next.js frontend to authorize the remote JWKS fetching endpoint correctly).
+
 
 #### 12. Start the Development Server:
 

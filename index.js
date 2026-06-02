@@ -54,11 +54,7 @@ async function run() {
     const destinationCollection = db.collection("destination");
     const bookingCollection = db.collection("bookings");
 
-    // ==========================================
-    // CARS / DESTINATION ROUTES
-    // ==========================================
-
-    // ১. সকল গাড়ি খোঁজা (সার্চ এবং ফিল্টার সহ)
+  
     app.get('/destination', async (req, res) => {
       const { search, carType } = req.query;
       const query = {};
@@ -68,7 +64,7 @@ async function run() {
       res.json(result);
     });
 
-    // ২. শুধুমাত্র লগইন করা ইউজারের অ্যাড করা গাড়িগুলো দেখা
+   
     app.get('/my-cars', verifyToken, async (req, res) => {
       try {
         const userEmail = req.user?.email; 
@@ -84,13 +80,13 @@ async function run() {
       }
     });
 
-    // ৩. নির্দিষ্ট একটি গাড়ির ডিটেইলস দেখা
+    
     app.get("/destination/:id", verifyToken, async (req, res) => {
       const result = await destinationCollection.findOne({ _id: new ObjectId(req.params.id) });
       res.json(result);
     });
 
-    // ৪. নতুন গাড়ি যুক্ত করা
+  
     app.post("/destination", verifyToken, async (req, res) => {
       const carData = req.body;
       const userEmail = req.user?.email;
@@ -98,14 +94,15 @@ async function run() {
       const carWithOwner = {
         ...carData,
         ownerEmail: userEmail,
-        bookingCount: 0 // নতুন গাড়ি এড করার সময় ডিফল্ট কাউন্ট ০ থাকবে
+        bookingCount: 0 
       };
 
       const result = await destinationCollection.insertOne(carWithOwner);
       res.json({ success: true, insertedId: result.insertedId });
     });
 
-    // ৫. গাড়ির তথ্য আপডেট করা
+   
+
     app.put("/cars/:id", verifyToken, async (req, res) => {
       try {
         const id = req.params.id;
@@ -139,7 +136,7 @@ async function run() {
       }
     });
 
-    // ৬. গাড়ি ডিলিট করা
+  
     app.delete("/cars/:id", verifyToken, async (req, res) => {
       try {
         const id = req.params.id;
@@ -161,10 +158,7 @@ async function run() {
     });
 
 
-    // ==========================================
-    // BOOKING ROUTES (ডুপ্লিকেট চেক রিমুভড ও কাউন্টার যুক্ত)
-    // ==========================================
-
+   
     app.get("/booking/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
       const result = await bookingCollection.find({
@@ -177,11 +171,11 @@ async function run() {
       try {
         const bookingData = req.body;
 
-        // এখানে ডুপ্লিকেট চেক (alreadyBooked) টোটালি বাদ দেওয়া হয়েছে।
+       
         const result = await bookingCollection.insertOne(bookingData);
 
         if (result.insertedId) {
-          // বুকিং সফল হলে destination কালেকশনে ঐ গাড়ির bookingCount ১ বাড়ানো হবে
+         
           await destinationCollection.updateOne(
             { _id: new ObjectId(bookingData.carId) },
             { $inc: { bookingCount: 1 } }
@@ -202,7 +196,7 @@ async function run() {
       res.json({ success: true, deletedCount: result.deletedCount });
     });
 
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    // app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
   } catch (err) {
     console.error("Connection error:", err);
   }
