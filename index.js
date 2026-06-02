@@ -15,7 +15,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-const JWKS = createRemoteJWKSet(new URL(`${process.env.BETTER_AUTH_URL}/api/auth/jwks`));
+const JWKS = createRemoteJWKSet(new URL(`${process.env.CLIENT_URL}/api/auth/jwks`));
 
 const verifyToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -28,7 +28,7 @@ const verifyToken = async (req, res, next) => {
     const token = authHeader.split(" ")[1];
     const { payload } = await jwtVerify(token, JWKS);
     console.log(payload);
-    req.user = payload;
+    req.user = payload; 
     next();
   } catch (error) {
     return res.status(401).json({ message: "Unauthorized: Invalid or expired token" });
@@ -46,28 +46,124 @@ const client = new MongoClient(process.env.MONGODB_URI, {
 async function run() {
   try {
     await client.connect();
-    console.log("Successfully connected to MongoDB!");
+    
+    await client.db("admin").command({ ping: 1 });
+    console.log("Pinged your deployment. Successfully connected to MongoDB!");
 
     const db = client.db("DriveFeet");
     const destinationCollection = db.collection("destination");
     const bookingCollection = db.collection("bookings");
 
+    // ==========================================
+    // CARS / DESTINATION ROUTES
+    // ==========================================
+
+    // ১. সকল গাড়ি খোঁজা (সার্চ এবং ফিল্টার সহ)
     app.get('/destination', async (req, res) => {
-      const result = await destinationCollection.find().toArray();
+      const { search, carType } = req.query;
+      const query = {};
+      if (search) query.carName = { $regex: search, $options: 'i' };
+      if (carType) query.carType = { $regex: carType, $options: 'i' };
+      const result = await destinationCollection.find(query).toArray();
       res.json(result);
     });
 
+    // ২. শুধুমাত্র লগইন করা ইউজারের অ্যাড করা গাড়িগুলো দেখা
+    app.get('/my-cars', verifyToken, async (req, res) => {
+      try {
+        const userEmail = req.user?.email; 
+        if (!userEmail) {
+          return res.status(400).json({ success: false, message: "User email not found in token" });
+        }
+        
+        const query = { ownerEmail: userEmail };
+        const result = await destinationCollection.find(query).toArray();
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+      }
+    });
+
+    // ৩. নির্দিষ্ট একটি গাড়ির ডিটেইলস দেখা
     app.get("/destination/:id", verifyToken, async (req, res) => {
       const result = await destinationCollection.findOne({ _id: new ObjectId(req.params.id) });
       res.json(result);
     });
 
-    // ✅ নতুন route যোগ করা হয়েছে
+    // ৪. নতুন গাড়ি যুক্ত করা
     app.post("/destination", verifyToken, async (req, res) => {
       const carData = req.body;
-      const result = await destinationCollection.insertOne(carData);
+      const userEmail = req.user?.email;
+
+      const carWithOwner = {
+        ...carData,
+        ownerEmail: userEmail,
+        bookingCount: 0 // নতুন গাড়ি এড করার সময় ডিফল্ট কাউন্ট ০ থাকবে
+      };
+
+      const result = await destinationCollection.insertOne(carWithOwner);
       res.json({ success: true, insertedId: result.insertedId });
     });
+
+    // ৫. গাড়ির তথ্য আপডেট করা
+    app.put("/cars/:id", verifyToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const userEmail = req.user?.email;
+        const updatedData = req.body;
+
+        const car = await destinationCollection.findOne({ _id: new ObjectId(id) });
+        if (!car) {
+          return res.status(404).json({ success: false, message: "Car not found" });
+        }
+        if (car.ownerEmail !== userEmail) {
+          return res.status(403).json({ success: false, message: "Forbidden: You cannot update someone else's car" });
+        }
+
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: {
+            dailyPrice: updatedData.dailyPrice,
+            description: updatedData.description,
+            availability: updatedData.availability,
+            imageUrl: updatedData.imageUrl,
+            carType: updatedData.carType,
+            pickupLocation: updatedData.pickupLocation,
+          },
+        };
+
+        const result = await destinationCollection.updateOne(filter, updateDoc);
+        res.json({ success: true, modifiedCount: result.modifiedCount });
+      } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+      }
+    });
+
+    // ৬. গাড়ি ডিলিট করা
+    app.delete("/cars/:id", verifyToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const userEmail = req.user?.email;
+
+        const car = await destinationCollection.findOne({ _id: new ObjectId(id) });
+        if (!car) {
+          return res.status(404).json({ success: false, message: "Car not found" });
+        }
+        if (car.ownerEmail !== userEmail) {
+          return res.status(403).json({ success: false, message: "Forbidden: You cannot delete someone else's car" });
+        }
+
+        const result = await destinationCollection.deleteOne({ _id: new ObjectId(id) });
+        res.json({ success: true, deletedCount: result.deletedCount });
+      } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+      }
+    });
+
+
+    // ==========================================
+    // BOOKING ROUTES (ডুপ্লিকেট চেক রিমুভড ও কাউন্টার যুক্ত)
+    // ==========================================
 
     app.get("/booking/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
@@ -78,16 +174,24 @@ async function run() {
     });
 
     app.post("/booking", verifyToken, async (req, res) => {
-      const bookingData = req.body;
-      const alreadyBooked = await bookingCollection.findOne({
-        userEmail: { $regex: new RegExp(`^${bookingData.userEmail.trim()}$`, 'i') },
-        carId: bookingData.carId
-      });
+      try {
+        const bookingData = req.body;
 
-      if (alreadyBooked) return res.status(400).json({ success: false, message: "Already booked!" });
+        // এখানে ডুপ্লিকেট চেক (alreadyBooked) টোটালি বাদ দেওয়া হয়েছে।
+        const result = await bookingCollection.insertOne(bookingData);
 
-      const result = await bookingCollection.insertOne(bookingData);
-      res.json({ success: true, insertedId: result.insertedId });
+        if (result.insertedId) {
+          // বুকিং সফল হলে destination কালেকশনে ঐ গাড়ির bookingCount ১ বাড়ানো হবে
+          await destinationCollection.updateOne(
+            { _id: new ObjectId(bookingData.carId) },
+            { $inc: { bookingCount: 1 } }
+          );
+        }
+
+        res.json({ success: true, insertedId: result.insertedId });
+      } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+      }
     });
 
     app.delete("/booking/:bookingId", verifyToken, async (req, res) => {
@@ -105,3 +209,5 @@ async function run() {
 }
 
 run();
+
+module.exports = app;
