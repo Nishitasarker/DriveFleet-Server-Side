@@ -9,10 +9,22 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://car-app-tawny.vercel.app"
+];
+
 app.use(cors({
-  origin: "http://localhost:3000",
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
+
 app.use(express.json());
 
 
@@ -39,13 +51,13 @@ const verifyToken = async (req, res, next) => {
     if (!JWKS) throw new Error("JWKS is not configured");
     
     const { payload } = await jose.jwtVerify(token, JWKS);
-    console.log(payload);
     req.user = payload; 
     next();
   } catch (error) {
     return res.status(401).json({ message: "Unauthorized: Invalid or expired token" });
   }
 };
+
 
 const client = new MongoClient(process.env.MONGODB_URI, {
   serverApi: {
@@ -67,6 +79,7 @@ async function connectDB() {
   }
 }
 
+
 app.use(async (req, res, next) => {
   try {
     await connectDB();
@@ -76,6 +89,7 @@ app.use(async (req, res, next) => {
     res.status(500).json({ success: false, message: "Database connection failed" });
   }
 });
+
 
 app.get('/', (req, res) => {
   res.send('Car App Server is running! 🚗');
@@ -213,7 +227,7 @@ app.delete("/booking/:bookingId", verifyToken, async (req, res) => {
 
 
 if (process.env.NODE_ENV !== 'production') {
-  app.listen(PORT, () => console.log(`Server running locally on port ${PORT} `));
+  app.listen(PORT, () => console.log(`Server running locally on port ${PORT}`));
 }
 
 module.exports = app;
