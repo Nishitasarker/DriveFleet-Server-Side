@@ -3,7 +3,7 @@ const dotenv = require('dotenv');
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
-// 'jose' প্যাকেজটিকে CommonJS (require) মোডে ব্যবহারের সঠিক নিয়ম:
+// jose ইমপোর্ট করার সবচেয়ে নিরাপদ ও স্ট্যান্ডার্ড নিয়ম (CommonJS এর জন্য)
 const jose = require('jose'); 
 
 dotenv.config();
@@ -17,7 +17,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// jose অবজেক্ট থেকে ফাংশন কল করা হয়েছে
+// jose অবজেক্ট থেকে সরাসরি মেথড কল
 const JWKS = jose.createRemoteJWKSet(new URL(`${process.env.CLIENT_URL}/api/auth/jwks`));
 
 const verifyToken = async (req, res, next) => {
@@ -49,12 +49,13 @@ const client = new MongoClient(process.env.MONGODB_URI, {
 
 async function run() {
   try {
-    // Vercel-এর জন্য চিরস্থায়ী কানেকশন এড়াতে গ্লোবাল ক্লায়েন্ট সরাসরি ব্যবহার করা হচ্ছে
+    // await client.connect();
+    // await client.db("admin").command({ ping: 1 });
+    console.log("Pinged your deployment. Successfully connected to MongoDB!");
+
     const db = client.db("DriveFeet");
     const destinationCollection = db.collection("destination");
     const bookingCollection = db.collection("bookings");
-
-    console.log("Successfully prepared MongoDB collections!");
 
     app.get('/', (req, res) => {
       res.json({ message: 'Car App Server is running! 🚗' });
@@ -190,6 +191,7 @@ async function run() {
       res.json({ success: true, deletedCount: result.deletedCount });
     });
 
+    // app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
   } catch (err) {
     console.error("Connection error:", err);
   }
