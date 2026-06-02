@@ -27,7 +27,6 @@ app.use(cors({
 
 app.use(express.json());
 
-
 const JWKS = createRemoteJWKSet();
 
 function createRemoteJWKSet() {
@@ -58,7 +57,6 @@ const verifyToken = async (req, res, next) => {
   }
 };
 
-
 const client = new MongoClient(process.env.MONGODB_URI, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -79,7 +77,6 @@ async function connectDB() {
   }
 }
 
-
 app.use(async (req, res, next) => {
   try {
     await connectDB();
@@ -89,7 +86,6 @@ app.use(async (req, res, next) => {
     res.status(500).json({ success: false, message: "Database connection failed" });
   }
 });
-
 
 app.get('/', (req, res) => {
   res.send('Car App Server is running! 🚗');
@@ -217,14 +213,35 @@ app.post("/booking", verifyToken, async (req, res) => {
   }
 });
 
+// মডিফাইড ডিলিট রুট (কাউন্ট কমানোর লজিকসহ)
 app.delete("/booking/:bookingId", verifyToken, async (req, res) => {
-  const { bookingId } = req.params;
-  const result = await bookingCollection.deleteOne({
-    _id: new ObjectId(bookingId)
-  });
-  res.json({ success: true, deletedCount: result.deletedCount });
-});
+  try {
+    const { bookingId } = req.params;
 
+    // ১. প্রথমে বুকিং ডাটা খুঁজে বের করা যাতে কার আইডি (carId) পাওয়া যায়
+    const booking = await bookingCollection.findOne({ _id: new ObjectId(bookingId) });
+    
+    if (!booking) {
+      return res.status(404).json({ success: false, message: "Booking not found" });
+    }
+
+    // ২. বুকিংটি ডাটাবেজ থেকে ডিলিট করা
+    const deleteResult = await bookingCollection.deleteOne({ _id: new ObjectId(bookingId) });
+
+    // ৩. ডিলিট সফল হলে গাড়ির bookingCount ১ কমিয়ে দেওয়া
+    if (deleteResult.deletedCount > 0) {
+      await destinationCollection.updateOne(
+        { _id: new ObjectId(booking.carId) },
+        { $inc: { bookingCount: -1 } } // $inc: -1 দিলে ১ কমে যাবে
+      );
+    }
+
+    res.json({ success: true, deletedCount: deleteResult.deletedCount });
+  } catch (error) {
+    console.error("Error canceling booking:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 
 if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => console.log(`Server running locally on port ${PORT}`));
