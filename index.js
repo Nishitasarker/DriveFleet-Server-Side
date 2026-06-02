@@ -54,6 +54,10 @@ async function run() {
     const destinationCollection = db.collection("destination");
     const bookingCollection = db.collection("bookings");
 
+    app.get('/', (req, res) => {
+      res.json({ message: 'Car App Server is running! 🚗' });
+    });
+
   
     app.get('/destination', async (req, res) => {
       const { search, carType } = req.query;
