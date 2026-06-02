@@ -2,13 +2,12 @@ const express = require('express');
 const dotenv = require('dotenv');
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-
-// 'jose' ইমপোর্ট করার সবচেয়ে নিরাপদ ও আধুনিক নিয়ম (CommonJS-এর জন্য)
 const jose = require('jose'); 
 
 dotenv.config();
 
 const app = express();
+const PORT = process.env.PORT || 5000;
 
 app.use(cors({
   origin: "http://localhost:3000",
@@ -16,8 +15,17 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// jose অবজেক্ট থেকে সরাসরি মেথড কল করা হচ্ছে, কোনো সাব-পাথ ছাড়া
-const JWKS = jose.createRemoteJWKSet(new URL(`${process.env.CLIENT_URL}/api/auth/jwks`));
+
+const JWKS = createRemoteJWKSet();
+
+function createRemoteJWKSet() {
+  try {
+    return jose.createRemoteJWKSet(new URL(`${process.env.CLIENT_URL}/api/auth/jwks`));
+  } catch (error) {
+    console.error("JWKS Initialization Error: CLIENT_URL missing or invalid.");
+    return null;
+  }
+}
 
 const verifyToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -28,7 +36,8 @@ const verifyToken = async (req, res, next) => {
 
   try {
     const token = authHeader.split(" ")[1];
-    // এখানে নিরাপদভাবে ভেরিফাই করা হচ্ছে
+    if (!JWKS) throw new Error("JWKS is not configured");
+    
     const { payload } = await jose.jwtVerify(token, JWKS);
     console.log(payload);
     req.user = payload; 
@@ -46,14 +55,30 @@ const client = new MongoClient(process.env.MONGODB_URI, {
   }
 });
 
-// ডেটাবেজ কালেকশন
-const db = client.db("DriveFeet");
-const destinationCollection = db.collection("destination");
-const bookingCollection = db.collection("bookings");
+let db, destinationCollection, bookingCollection;
 
-// আপনার তৈরি করা সব রাউট এবং ফাংশন (হুবহু আগের মতোই অপরিবর্তিত আছে)
+async function connectDB() {
+  if (!db) {
+    await client.connect();
+    db = client.db("DriveFeet");
+    destinationCollection = db.collection("destination");
+    bookingCollection = db.collection("bookings");
+    console.log("Connected to MongoDB Successfully!");
+  }
+}
+
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (error) {
+    console.error("Database connection error:", error);
+    res.status(500).json({ success: false, message: "Database connection failed" });
+  }
+});
+
 app.get('/', (req, res) => {
-  res.json({ message: 'Car App Server is running! 🚗' });
+  res.send('Car App Server is running! 🚗');
 });
 
 app.get('/destination', async (req, res) => {
@@ -185,5 +210,10 @@ app.delete("/booking/:bookingId", verifyToken, async (req, res) => {
   });
   res.json({ success: true, deletedCount: result.deletedCount });
 });
+
+
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => console.log(`Server running locally on port ${PORT} `));
+}
 
 module.exports = app;
